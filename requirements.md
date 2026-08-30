@@ -14,8 +14,12 @@ pip install openpyxl
 ```
 for exporting the data to excel sheet. 
 ```bash 
-pip install dotenv
+pip install python-dotenv
 ```
 to access the API_KEY from the .env file. 
 
+```bash
+pip install requests
+```
+downloads and installs the requests library from the Python Package Index (PyPI) into your Python environment. Once installed, it allows you to easily interact with the internet by sending HTTP requests through your Python code
 
