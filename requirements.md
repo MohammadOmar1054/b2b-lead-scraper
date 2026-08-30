@@ -3,6 +3,10 @@ This system works on scraping the database of [Prospeo](https://app.prospeo.io/s
 To scrape the database from the system , An API key is created from [prospeo-API_KEY](https://app.prospeo.io/api). 
 
 ## Packages & Frameworks required:
+```bash 
+pip install python-dotenv
+```
+to access the API_KEY from the .env file. 
 
 ```bash
 pip install pandas
@@ -13,10 +17,7 @@ for cleansing the extracted data
 pip install openpyxl 
 ```
 for exporting the data to excel sheet. 
-```bash 
-pip install python-dotenv
-```
-to access the API_KEY from the .env file. 
+
 
 ```bash
 pip install requests
