@@ -26,158 +26,158 @@ HEADERS = {
     "Content-Type": "application/json"
 }
 
-MAX_COMPANIES = 30
-MAX_PEOPLE_PER_COMPANY = 2
+# Keep this LOW for the demonstration.
+# Prospeo search returns max 25 results per page.
+MAX_PAGES = 1
+
+# Enrichment is a separate API operation/credit.
+MAX_ENRICHMENTS = 25
 
 
 # ============================================================
-# API HELPER
+# API REQUEST
 # ============================================================
 
 def prospeo_request(endpoint, payload):
 
     url = f"{BASE_URL}/{endpoint}"
 
-    response = requests.post(
-        url,
-        headers=HEADERS,
-        json=payload,
-        timeout=60
-    )
+    try:
 
-    print(
-        f"{endpoint}: HTTP {response.status_code}"
-    )
+        response = requests.post(
+            url,
+            headers=HEADERS,
+            json=payload,
+            timeout=60
+        )
 
-    if response.status_code != 200:
-        print(response.text)
+        print(
+            f"{endpoint}: HTTP {response.status_code}"
+        )
+
+        if response.status_code != 200:
+
+            print(response.text)
+
+            return None
+
+        return response.json()
+
+    except requests.RequestException as error:
+
+        print(
+            f"Request failed: {error}"
+        )
+
         return None
 
-    return response.json()
-
-
-# ============================================================
-# SEARCH COMPANIES
-# ============================================================
-
-def search_companies():
-
-    print("\nSearching for Indian companies...\n")
-
-    payload = {
-        "page": 1,
-
-        "filters": {
-            "company_location_search": {
-                "include": ["India"]
-            }
-        }
-    }
-
-    result = prospeo_request(
-        "search-company",
-        payload
-    )
-
-    if not result:
-        return []
-
-    companies = []
-
-    for item in result.get("results", []):
-
-        company = item.get("company", {})
-
-        companies.append({
-            "company_id": company.get("company_id"),
-            "company_name": company.get("name"),
-            "website": company.get("website"),
-            "domain": company.get("domain"),
-            "description": company.get("description"),
-
-            "city": (
-                company.get("location") or {}
-            ).get("city"),
-
-            "state": (
-                company.get("location") or {}
-            ).get("state"),
-
-            "country": (
-                company.get("location") or {}
-            ).get("country"),
-        })
-
-    return companies[:MAX_COMPANIES]
 
 # ============================================================
 # SEARCH PEOPLE
 # ============================================================
 
-def search_people(company_id):
+def search_people_by_title(page=1):
+
+    print(
+        f"\nSearching people - page {page}..."
+    )
 
     payload = {
-        "page": 1,
+
+        "page": page,
 
         "filters": {
 
-            "company": {
-                "company_oids": {
-                    "include": [company_id]
-                }
-            },
-
             "person_job_title": {
+
                 "include": [
-                    "owner",
-                    "founder",
-                    "director",
-                    "manager"
+
+                    # "owner",
+                    # "founder",
+                    # "co-founder",
+                    # "director",
+                    "travel agent",
+                    "travel consultant",
+                    "travel manager"
+
                 ],
 
-                "match_mode": "SMART"
+                "match_mode": "CONTAINS"
             },
 
-            "max_person_per_company": MAX_PEOPLE_PER_COMPANY
+            "person_location_search": {
+
+                "include": [
+                    "India"
+                ]
+            }
         }
     }
 
-    result = prospeo_request(
+    return prospeo_request(
         "search-person",
         payload
     )
 
-    if not result:
-        return []
 
-    return result.get("results", [])
+# ============================================================
+# ENRICH PERSON
+# ============================================================
+
+def enrich_person(person_id):
+
+    payload = {
+        "data": {
+            "person_id": person_id
+        }
+    }
+
+    return prospeo_request(
+        "enrich-person",
+        payload
+    )
 
 
 # ============================================================
-# EXTRACT RECORD
+# EXTRACT BASIC SEARCH DATA
 # ============================================================
 
-def create_record(person_result, company):
+def extract_basic_record(search_result):
 
-    person = person_result.get(
+    person = search_result.get(
         "person",
         {}
     )
 
-    person_location = (
-        person.get("location") or {}
+    company = search_result.get(
+        "company",
+        {}
     )
 
-    record = {
+    person_location = (
+        person.get("location")
+        or {}
+    )
 
-        "Business Name":
-            company.get("company_name"),
+    company_location = (
+        company.get("location")
+        or {}
+    )
+
+    return {
+
+        "Person ID":
+            person.get("person_id"),
 
         "Contact Person":
             person.get("full_name"),
 
         "Job Title":
-            person.get("job_title"),
+            person.get("current_job_title")
+            or person.get("job_title"),
+
+        "Business Name":
+            company.get("name"),
 
         "Phone":
             "",
@@ -186,52 +186,182 @@ def create_record(person_result, company):
             "",
 
         "Address":
-            "",
+            company_location.get("raw_address")
+            or "",
 
         "City":
             person_location.get("city")
-            or company.get("city"),
+            or company_location.get("city")
+            or "",
 
         "State":
             person_location.get("state")
-            or company.get("state"),
+            or company_location.get("state")
+            or "",
 
         "Country":
             person_location.get("country")
-            or company.get("country"),
+            or company_location.get("country")
+            or "",
 
         "Website":
-            company.get("website"),
+            company.get("website")
+            or "",
 
         "Domain":
-            company.get("domain"),
+            company.get("domain")
+            or "",
+
+        "LinkedIn":
+            person.get("linkedin_url")
+            or "",
 
         "Source":
             "Prospeo API"
     }
 
+
+# ============================================================
+# ADD ENRICHED DATA
+# ============================================================
+
+def add_enrichment(record, enrichment_result):
+
+    if not enrichment_result:
+        return record
+
+    person = enrichment_result.get(
+        "person",
+        {}
+    )
+
+    # --------------------------------------------------------
+    # EMAIL
+    # --------------------------------------------------------
+
+    email_data = person.get(
+        "email"
+    )
+
+    if isinstance(email_data, dict):
+
+        record["Email"] = (
+            email_data.get("email")
+            or email_data.get("value")
+            or ""
+        )
+
+    elif isinstance(email_data, str):
+
+        record["Email"] = email_data
+
+
+    # --------------------------------------------------------
+    # MOBILE
+    # --------------------------------------------------------
+
+    mobile_data = person.get(
+        "mobile"
+    )
+
+    if isinstance(mobile_data, dict):
+
+        record["Phone"] = (
+            mobile_data.get("mobile")
+            or mobile_data.get("phone")
+            or mobile_data.get("value")
+            or ""
+        )
+
+    elif isinstance(mobile_data, str):
+
+        record["Phone"] = mobile_data
+
+
+    # --------------------------------------------------------
+    # FALLBACK PHONE FIELDS
+    # --------------------------------------------------------
+
+    if not record["Phone"]:
+
+        record["Phone"] = (
+            person.get("phone")
+            or person.get("mobile_number")
+            or ""
+        )
+
+
+    # --------------------------------------------------------
+    # LINKEDIN
+    # --------------------------------------------------------
+
+    if not record["LinkedIn"]:
+
+        record["LinkedIn"] = (
+            person.get("linkedin_url")
+            or ""
+        )
+
+
     return record
+
+
+# ============================================================
+# CLEAN DATA
+# ============================================================
+
+def clean_data(records):
+
+    if not records:
+
+        return pd.DataFrame()
+
+    df = pd.DataFrame(records)
+
+    # Remove duplicate people
+    if "Person ID" in df.columns:
+
+        df = df.drop_duplicates(
+            subset=["Person ID"]
+        )
+
+    else:
+
+        df = df.drop_duplicates(
+            subset=[
+                "Contact Person",
+                "Business Name"
+            ]
+        )
+
+    # Clean whitespace
+    for column in df.columns:
+
+        if df[column].dtype == "object":
+
+            df[column] = (
+                df[column]
+                .fillna("")
+                .astype(str)
+                .str.strip()
+            )
+
+    return df
 
 
 # ============================================================
 # SAVE EXCEL
 # ============================================================
 
-def save_excel(records):
+def save_excel(df):
 
-    if not records:
-        print("\nNo records found.")
+    if df.empty:
+
+        print(
+            "\nNo records to save."
+        )
+
         return
-
-    df = pd.DataFrame(records)
-
-    # Remove completely duplicated records
-    df = df.drop_duplicates(
-        subset=[
-            "Business Name",
-            "Contact Person"
-        ]
-    )
 
     os.makedirs(
         "output",
@@ -247,16 +377,24 @@ def save_excel(records):
         index=False
     )
 
-    print("\n================================")
-    print("SCRAPING COMPLETE")
-    print("================================")
+    print(
+        "\n========================================"
+    )
+
+    print(
+        "EXCEL EXPORT COMPLETE"
+    )
+
+    print(
+        "========================================"
+    )
 
     print(
         f"Records exported: {len(df)}"
     )
 
     print(
-        f"Excel file: {output_file}"
+        f"File: {output_file}"
     )
 
 
@@ -266,58 +404,148 @@ def save_excel(records):
 
 def main():
 
-    print("================================")
-    print("INDIA TRAVEL AGENT DATABASE")
-    print("================================")
-
-    companies = search_companies()
-
     print(
-        f"\nCompanies found: {len(companies)}"
+        "========================================"
     )
 
-    records = []
+    print(
+        "INDIA TRAVEL AGENT DATABASE"
+    )
 
-    for index, company in enumerate(
-        companies,
-        start=1
+    print(
+        "========================================"
+    )
+
+
+    # --------------------------------------------------------
+    # SEARCH
+    # --------------------------------------------------------
+
+    all_records = []
+
+    for page in range(
+        1,
+        MAX_PAGES + 1
     ):
 
-        print(
-            f"\n[{index}/{len(companies)}] "
-            f"{company['company_name']}"
+        result = search_people_by_title(
+            page
         )
 
-        company_id = company.get(
-            "company_id"
-        )
+        if not result:
 
-        if not company_id:
-            continue
-
-        people = search_people(
-            company_id
-        )
-
-        print(
-            f"People found: {len(people)}"
-        )
-
-        for person in people:
-
-            record = create_record(
-                person,
-                company
+            print(
+                "\nSearch failed."
             )
 
-            records.append(record)
-
-        # Avoid hammering the API.
-        time.sleep(1)
+            return
 
 
-    save_excel(records)
+        results = result.get(
+            "results",
+            []
+        )
 
+        print(
+            f"Search returned "
+            f"{len(results)} people."
+        )
+
+
+        # ----------------------------------------------------
+        # PROCESS SEARCH RESULTS
+        # ----------------------------------------------------
+
+        for result_item in results:
+
+            record = extract_basic_record(
+                result_item
+            )
+
+            person_id = record.get(
+                "Person ID"
+            )
+
+            print(
+                f"\nFound: "
+                f"{record['Contact Person']}"
+            )
+
+            print(
+                f"Company: "
+                f"{record['Business Name']}"
+            )
+
+            print(
+                f"Title: "
+                f"{record['Job Title']}"
+            )
+
+
+            # ------------------------------------------------
+            # ENRICH
+            # ------------------------------------------------
+
+            if person_id:
+
+                print(
+                    "Enriching contact..."
+                )
+
+                enrichment = enrich_person(
+                    person_id
+                )
+
+                record = add_enrichment(
+                    record,
+                    enrichment
+                )
+
+                print(
+                    f"Email: "
+                    f"{record['Email'] or 'N/A'}"
+                )
+
+                print(
+                    f"Phone: "
+                    f"{record['Phone'] or 'N/A'}"
+                )
+
+                # Don't hammer the API.
+                time.sleep(1)
+
+
+            all_records.append(
+                record
+            )
+
+
+    # --------------------------------------------------------
+    # CLEAN
+    # --------------------------------------------------------
+
+    print(
+        "\nCleaning data..."
+    )
+
+    df = clean_data(
+        all_records
+    )
+
+
+    # --------------------------------------------------------
+    # EXPORT
+    # --------------------------------------------------------
+
+    save_excel(
+        df
+    )
+
+
+# ============================================================
+# ENTRY POINT
+# ============================================================
 
 if __name__ == "__main__":
+
     main()
